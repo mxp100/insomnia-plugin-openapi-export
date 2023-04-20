@@ -6,5 +6,5 @@
     "name": "openapi-export",
     "description": "OpenAPI 3.0 Export"
   },
-  "main": "main.js",
+  "main": "main.js"
 }
