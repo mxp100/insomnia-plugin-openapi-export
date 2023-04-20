@@ -1,2 +1,6 @@
-# Install INSO
-https://docs.insomnia.rest/inso-cli/install
+# Requirements
+## Linux
+Required wget and tar
+
+## Darwin (MacOS)
+Required curl and unzip
