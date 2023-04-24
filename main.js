@@ -53,8 +53,10 @@ module.exports.workspaceActions = [{
                     await exec('wget https://github.com/Fyb3roptik/swaggomnia/releases/download/2.0.1/swaggomnia_linux_amd64.tar.gz -O ' + __dirname + '/swaggomnia.tar.gz');
                     await exec('tar -xvf ' + __dirname + '/swaggomnia.tar.gz -C ' + __dirname);
                 }
-                console.log(swaggomniaFile + ' generate -insomnia ' + savePath + '.insomnia -config ' + savePath + '.config -output json > ' + savePath);
-                await exec(swaggomniaFile + ' generate -insomnia ' + savePath + '.insomnia -config ' + savePath + '.config -output json')
+                await exec(swaggomniaFile + ' generate -insomnia ' + savePath + '.insomnia -config ' + savePath + '.config -output json', {
+                    cwd: __dirname
+                })
+                debugger
                 fs.renameSync(__dirname + '/swagger.json', savePath);
                 break
             case 'darwin':
@@ -63,8 +65,9 @@ module.exports.workspaceActions = [{
                     await exec('curl -o ' + __dirname + '/swaggomnia.zip https://github.com/Fyb3roptik/swaggomnia/releases/download/2.0.1/swaggomnia_darwin_amd64.zip');
                     await exec('unzip ' + __dirname + '/swaggomnia.zip -d ' + __dirname);
                 }
-                console.log(swaggomniaFile + ' generate -insomnia ' + savePath + '.insomnia -config ' + savePath + '.config -output json > ' + savePath);
-                await exec(swaggomniaFile + ' generate -insomnia ' + savePath + '.insomnia -config ' + savePath + '.config -output json')
+                await exec(swaggomniaFile + ' generate -insomnia ' + savePath + '.insomnia -config ' + savePath + '.config -output json', {
+                    cwd: __dirname
+                })
                 fs.renameSync(__dirname + '/swagger.json', savePath);
                 break
             default:
