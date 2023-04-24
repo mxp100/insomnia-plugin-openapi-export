@@ -15,5 +15,6 @@
     "url": "https://github.com/mxp100/insomnia-plugin-openapi-export/issues"
   },
   "homepage": "https://github.com/mxp100/insomnia-plugin-openapi-export",
-  "main": "main.js"
+  "main": "main.js",
+  "keywords": ["insomnia", "plugin", "swagger", "openapi", "export"]
 }
