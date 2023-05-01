@@ -1,84 +1,342 @@
 const fs = require('fs');
 const path = require('path');
-const util = require('util');
-const exec = util.promisify(require('child_process').exec);
 
-module.exports.workspaceActions = [{
-    label: 'Export as Swagger (powered by Swaggomnia 2.0.1)',
-    icon: 'fa-star',
-    action: async (context, models) => {
+class OpenApiExport {
+    constructor(context, models) {
+        this.context = context;
+        this.models = models;
+    }
 
-        const baseUrl = await context.app.prompt('Base Url', {
-            defaultValue: localStorage.getItem('insomnia.export.openapi.base_url') || 'http://example.tld'
-        })
-
-        if (!baseUrl) return;
-        localStorage.setItem('insomnia.export.openapi.base_url', baseUrl);
-
-        const apiVersion = await context.app.prompt('API version', {
-            defaultValue: localStorage.getItem('insomnia.export.openapi.api_version') || '1.0.0'
-        })
-
-        if (!apiVersion) return;
-        localStorage.setItem('insomnia.export.openapi.api_version', apiVersion);
-
-        const savePath = await context.app.showSaveDialog({
-            defaultPath: localStorage.getItem('insomnia.lastExportPath') || ''
-        });
-        if (!savePath) return;
-
-        localStorage.setItem('insomnia.lastExportPath', path.dirname(savePath));
-
-        const insomniaExport = await context.data.export.insomnia({
+    async getData() {
+        const insomniaExport = await this.context.data.export.insomnia({
             includePrivate: false,
             format: 'json',
-            workspace: models.workspace,
+            workspace: this.models.workspace,
         });
 
-        const config = {
-            title: models.workspace.name,
-            version: apiVersion,
-            basePath: baseUrl,
-            description: models.workspace.description
+        return JSON.parse(insomniaExport);
+    }
+
+    async getServers(envs) {
+        const servers = [];
+        await envs.reduce(async (a, item) => {
+            await a;
+
+            try {
+                const variableName = await this.context.app.prompt(
+                    'Environment "' + item.name + '" please select base URL variable:',
+                    {
+                        submitName: 'Select (keep empty for skip)',
+                        cancelable: true,
+                        hints: Object.keys(item.data)
+                    }
+                )
+
+                const variables = {};
+                await Object.entries(item.data).reduce(async (b, dataItem) => {
+                    await b;
+
+                    variables[dataItem[0]] = {
+                        default: dataItem[1] + ''
+                    };
+                }, Promise.resolve());
+
+                servers.push({
+                    url: item.data[variableName],
+                    description: item.name,
+                    variables: variables
+                });
+            } catch (e) {
+
+            }
+        }, Promise.resolve())
+
+        return servers;
+    }
+
+    getTags(groups) {
+        groups = groups.map((item) => {
+            if (item.parentId.indexOf('wrk_') === 0) {
+                item.parentId = '';
+            }
+            return item;
+        });
+        const getPaths = function (arr) {
+            const map = new Map();
+
+            arr.forEach(obj => {
+                map.set(obj.id, obj);
+            });
+
+            arr.forEach(obj => {
+                let path = [];
+                let current = obj;
+
+                while (current) {
+                    path.unshift(current.name);
+                    current = map.get(current.parentId);
+                }
+
+                obj.path = path;
+            });
+
+            return arr;
+        }
+        groups = getPaths(groups);
+
+        return groups.map((group) => {
+            group.path = group.path.join('/')
+            return {
+                name: group.path,
+                description: group.description
+            }
+        });
+    }
+
+    getPaths(requests, groups) {
+        const result = {};
+
+        const getUrlParams = (url) => {
+            const paramRegex = /{{([^{}]+)}}/g;
+            const params = [];
+            let match;
+            while ((match = paramRegex.exec(url)) !== null) {
+                params.push(match[1]);
+            }
+            return params;
         }
 
-        fs.writeFileSync(savePath + '.insomnia', insomniaExport);
-        fs.writeFileSync(savePath + '.config', JSON.stringify(config));
+        requests.forEach((item) => {
+            let url = item.url
+            const params = getUrlParams(url);
+            let uri = '';
+            if (url.indexOf('{') === 0) {
+                uri = url.replace('{{' + params[0] + '}}', '');
+            } else {
+                uri = url;
+            }
+            let replacedPathParams = Array.from(uri.matchAll(/\{{2,}\s*_\.([a-z0-9]*?)\s*}{2,}/g))
+            uri = uri.replace(/\{{2,}\s*_\.([a-z0-9]*)\s*}{2,}/g, '\{$1\}');
 
-        let swaggomniaFile = '';
-        switch (process.platform) {
-            case 'linux':
-                swaggomniaFile = __dirname + '/swaggomnia_linux_amd64/swaggomnia'
-                if (!fs.existsSync(swaggomniaFile)) {
-                    await exec('wget https://github.com/Fyb3roptik/swaggomnia/releases/download/2.0.1/swaggomnia_linux_amd64.tar.gz -O ' + __dirname + '/swaggomnia.tar.gz');
-                    await exec('tar -xvf ' + __dirname + '/swaggomnia.tar.gz -C ' + __dirname);
+            const method = item.method.toLowerCase();
+
+            if (result[uri] === undefined) {
+                result[uri] = {}
+            }
+
+            if (result[uri][method] === undefined) {
+                result[uri][method] = {}
+            }
+
+            const requestBody = {};
+
+            if (Object.keys(item.body).length > 0) {
+                requestBody.required = true;
+                switch (item.body.mimeType) {
+                    case 'application/json':
+                        requestBody.content = {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    example: JSON.parse(item.body.text)
+                                },
+                            }
+                        }
+                        break;
+                    case 'application/x-www-form-urlencoded':
+                    case 'multipart/form-data':
+                        const schema = {
+                            type: 'object',
+                            properties: {}
+                        };
+                        const example = {};
+                        item.body.params.forEach((param) => {
+                            if (param.type === 'file') {
+                                schema.properties[param.name] = {
+                                    type: 'string',
+                                    format: 'binary',
+                                    description: param.description
+                                }
+                            } else {
+                                schema.properties[param.name] = {
+                                    type: typeof param.value,
+                                    description: param.description,
+                                    default: param.value
+                                }
+                            }
+                        });
+                        requestBody.content = {};
+                        requestBody.content[item.body.mimeType] = {
+                            schema: schema
+                        }
+                        break;
                 }
-                await exec(swaggomniaFile + ' generate -insomnia ' + savePath + '.insomnia -config ' + savePath + '.config -output json', {
-                    cwd: __dirname
-                })
-                debugger
-                fs.renameSync(__dirname + '/swagger.json', savePath);
-                break
-            case 'darwin':
-                swaggomniaFile = __dirname + '/swaggomnia_darwin_amd64/swaggomnia'
-                if (!fs.existsSync(swaggomniaFile)) {
-                    await exec('curl -o ' + __dirname + '/swaggomnia.zip https://github.com/Fyb3roptik/swaggomnia/releases/download/2.0.1/swaggomnia_darwin_amd64.zip');
-                    await exec('unzip ' + __dirname + '/swaggomnia.zip -d ' + __dirname);
+            }
+
+            const path = {
+                description: item.description,
+                summary: item.name,
+                tags: [
+                    groups.find(group => group.id === item.parentId).path
+                ],
+                parameters: [],
+                responses: {
+                    "200": {
+                        description: 'successful'
+                    },
+                    "401": {
+                        description: 'authorization failed'
+                    },
+                    "422": {
+                        description: 'validation failed'
+                    },
+                    "500": {
+                        description: 'unknown server error'
+                    }
                 }
-                await exec(swaggomniaFile + ' generate -insomnia ' + savePath + '.insomnia -config ' + savePath + '.config -output json', {
-                    cwd: __dirname
-                })
-                fs.renameSync(__dirname + '/swagger.json', savePath);
-                break
-            default:
-                await context.app.alert('Unsupported platform', 'Current platform "' + process.platform + '" not supported now!');
-                fs.rmSync(savePath + '.insomnia');
-                fs.rmSync(savePath + '.config');
-                return;
+            }
+
+            if (Object.keys(requestBody).length > 0) {
+                path.requestBody = requestBody;
+            }
+
+            if (replacedPathParams.length > 0) {
+                replacedPathParams.forEach((replacedPathParam) => {
+                    path.parameters.push({
+                        name: replacedPathParam[1],
+                        in: 'path',
+                        required: true,
+                        schema: {
+                            type: 'string'
+                        }
+                    })
+                });
+            }
+
+            if (item.parameters.length > 0) {
+                item.parameters.forEach((parameter) => {
+                    path.parameters.push({
+                        name: parameter.name,
+                        description: parameter.description,
+                        in: 'query',
+                        schema: {
+                            type: 'string'
+                        },
+                        example: parameter.value
+                    })
+                });
+            }
+
+            result[uri][method] = path;
+        });
+
+        return result;
+    }
+
+    async getAuthMethod() {
+        try {
+            return await this.context.app.prompt(
+                'Authorization method',
+                {
+                    submitName: 'Select (keep empty for skip)',
+                    cancelable: true,
+                    hints: ['bearer']
+                }
+            )
+        } catch (e) {
+            return '';
+        }
+    }
+}
+
+module.exports.workspaceActions = [{
+    label: 'Export as OpenAPI 3.0',
+    icon: 'fa-solid fa-file-export',
+    action: async (context, models) => {
+        const openapi = new OpenApiExport(context, models);
+
+        let savePath;
+        try {
+            const defaultPath = await context.store.getItem('last_save_path');
+            savePath = await context.app.showSaveDialog({
+                defaultPath: defaultPath || ''
+            })
+        } catch (e) {
+            return;
+        }
+        await context.store.setItem('last_save_path', path.dirname(savePath));
+
+        const authMethod = await openapi.getAuthMethod();
+
+        const insomniaData = await openapi.getData();
+
+        const envs = [];
+        const groups = [];
+        const requests = [];
+        insomniaData.resources.forEach((resource) => {
+            switch (resource._type) {
+                case 'environment':
+                    envs.push(resource);
+                    break;
+                case 'request_group':
+                    groups.push({
+                        id: resource._id,
+                        parentId: resource.parentId,
+                        name: resource.name,
+                        description: resource.description
+                    });
+                    break;
+                case 'request':
+                    requests.push(resource);
+                    break;
+                default:
+
+            }
+        })
+
+        const servers = await openapi.getServers(envs);
+        if (servers.length === 0) {
+            return;
+        }
+        const tags = openapi.getTags(groups);
+        const paths = openapi.getPaths(requests, groups);
+
+        const resultJson = {
+            openapi: '3.0.3',
+            info: {
+                title: models.workspace.name,
+                description: models.workspace.description,
+                version: '1.0.0'
+            },
+            paths: paths,
+            servers: servers,
+            tags: tags
         }
 
-        fs.rmSync(savePath + '.insomnia');
-        fs.rmSync(savePath + '.config');
+        if (authMethod) {
+            switch (authMethod) {
+                case 'bearer':
+                    resultJson.components = {
+                        securitySchemes: {
+                            bearerAuth: {
+                                type: 'http',
+                                scheme: 'bearer'
+                            }
+                        }
+                    }
+                    break;
+            }
+
+            resultJson.security = {
+                bearerAuth: []
+            }
+        }
+
+        fs.writeFileSync(__dirname + '/openapi.json', JSON.stringify(resultJson, null, 2));
+        fs.writeFileSync(savePath, JSON.stringify(resultJson, null, 2));
+
+        debugger
+
         await context.app.alert('Result', 'Done');
     },
 }];

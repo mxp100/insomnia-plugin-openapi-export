@@ -1,6 +1,6 @@
 {
   "name": "insomnia-plugin-openapi-export",
-  "version": "1.0.2",
+  "version": "2.0.0",
   "private": false,
   "insomnia": {
     "name": "openapi-export",
