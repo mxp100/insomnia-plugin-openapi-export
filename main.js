@@ -332,10 +332,7 @@ module.exports.workspaceActions = [{
             }
         }
 
-        fs.writeFileSync(__dirname + '/openapi.json', JSON.stringify(resultJson, null, 2));
         fs.writeFileSync(savePath, JSON.stringify(resultJson, null, 2));
-
-        debugger
 
         await context.app.alert('Result', 'Done');
     },
