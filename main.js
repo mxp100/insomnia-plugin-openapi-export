@@ -176,9 +176,7 @@ class OpenApiExport {
             const path = {
                 description: item.description,
                 summary: item.name,
-                tags: [
-                    groups.find(group => group.id === item.parentId).path
-                ],
+                tags: [],
                 parameters: [],
                 responses: {
                     "200": {
@@ -198,6 +196,13 @@ class OpenApiExport {
 
             if (Object.keys(requestBody).length > 0) {
                 path.requestBody = requestBody;
+            }
+
+            if (item.parentId) {
+                const foundedTag = groups.find(group => group.id === item.parentId);
+                if (foundedTag) {
+                    path.tags.push(foundedTag.path)
+                }
             }
 
             if (replacedPathParams.length > 0) {
@@ -264,6 +269,8 @@ module.exports.workspaceActions = [{
         } catch (e) {
             return;
         }
+        if (!savePath) return;
+
         await context.store.setItem('last_save_path', path.dirname(savePath));
 
         const authMethod = await openapi.getAuthMethod();
