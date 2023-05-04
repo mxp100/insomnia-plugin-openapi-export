@@ -232,26 +232,22 @@ class OpenApiExport {
                 });
             }
 
+            switch (item.authentication?.type) {
+                case 'bearer':
+                    path.security = [{
+                        bearerAuth: []
+                    }]
+                    break;
+                default:
+                    path.security = [];
+            }
+
             result[uri][method] = path;
         });
 
         return result;
     }
 
-    async getAuthMethod() {
-        try {
-            return await this.context.app.prompt(
-                'Authorization method',
-                {
-                    submitName: 'Select (keep empty for skip)',
-                    cancelable: true,
-                    hints: ['bearer']
-                }
-            )
-        } catch (e) {
-            return '';
-        }
-    }
 }
 
 module.exports.workspaceActions = [{
@@ -272,8 +268,6 @@ module.exports.workspaceActions = [{
         if (!savePath) return;
 
         await context.store.setItem('last_save_path', path.dirname(savePath));
-
-        const authMethod = await openapi.getAuthMethod();
 
         const insomniaData = await openapi.getData();
 
@@ -317,25 +311,14 @@ module.exports.workspaceActions = [{
             },
             paths: paths,
             servers: servers,
-            tags: tags
-        }
-
-        if (authMethod) {
-            switch (authMethod) {
-                case 'bearer':
-                    resultJson.components = {
-                        securitySchemes: {
-                            bearerAuth: {
-                                type: 'http',
-                                scheme: 'bearer'
-                            }
-                        }
+            tags: tags,
+            components: {
+                securitySchemes: {
+                    bearerAuth: {
+                        type: 'http',
+                        scheme: 'bearer'
                     }
-                    break;
-            }
-
-            resultJson.security = {
-                bearerAuth: []
+                }
             }
         }
 
