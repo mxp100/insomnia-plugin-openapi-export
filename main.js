@@ -138,7 +138,7 @@ class OpenApiExport {
                             'application/json': {
                                 schema: {
                                     type: 'object',
-                                    example: JSON.parse(item.body.text)
+                                    example: this._parseJsonBody(item.body.text)
                                 },
                             }
                         }
@@ -246,6 +246,14 @@ class OpenApiExport {
         });
 
         return result;
+    }
+
+    _parseJsonBody(bodyText) {
+        try {
+            return JSON.parse(bodyText);
+        } catch (error) {
+            return {};
+        }
     }
 
 }
